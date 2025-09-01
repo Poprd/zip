@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Pembuat & Pratinjau ZIP</title>
+  <style>
+    :root{ --bg:#0b1020; --card:#0f172a; --muted:#94a3b8; --fg:#e5e7eb; --primary:#60a5fa; --ok:#22c55e; --warn:#f59e0b }
+    *{box-sizing:border-box}
+    body{margin:0;font-family:system-ui,Segoe UI,Roboto,Arial;background:linear-gradient(180deg,#0b1020,#0a0f1e);color:var(--fg);}
+    .app{max-width:980px;margin:32px auto;padding:0 16px}
+    h1{margin:0 0 8px}
+    .muted{color:var(--muted)}
+    .card{background:linear-gradient(180deg,#0c1326,#0b1122);border:1px solid #1e293b;border-radius:16px;box-shadow:0 20px 50px rgba(0,0,0,.3);padding:16px}
+    .grid{display:grid;gap:14px}
+    .row{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+    .btn{padding:10px 14px;border-radius:10px;border:1px solid #223053;background:#11203a;color:#cbd5e1;cursor:pointer;font-weight:700}
+    .btn.primary{background:linear-gradient(180deg,#1f3b64,#183053);border-color:#2c4a7a}
+    .btn:disabled{opacity:.6;cursor:not-allowed}
+    .drop{border:2px dashed #2a3b5f;border-radius:14px;padding:18px;text-align:center;background:#0b1220}
+    .drop.highlight{background:#0e1a34}
+    input[type="text"],input[type="number"]{padding:10px 12px;border-radius:10px;border:1px solid #223053;background:#0b1020;color:var(--fg);width:100%}
+    .list{max-height:320px;overflow:auto;display:grid;gap:8px}
+    .file{display:flex;justify-content:space-between;gap:10px;background:#0b1220;border:1px solid #1e293b;border-radius:10px;padding:8px 10px}
+    .meta{color:#9ca3af;font-size:12px}
+    .progress{height:10px;background:#0b1220;border:1px solid #1e293b;border-radius:999px;overflow:hidden}
+    .bar{height:100%;width:0;background:#22c55e;transition:width .15s}
+    code{background:#0b1222;border:1px solid #1f2a44;border-radius:6px;padding:0 6px}
+    iframe{width:100%;height:400px;border:1px solid #1e293b;border-radius:10px;background:#fff}
+  </style>
+</head>
+<body>
+<div class="app">
+  <h1>Pembuat & Pratinjau ZIP</h1>
+  <p class="muted">Pilih/seret file (atau folder), lalu tekan <b>Enter</b> atau klik <b>Buat ZIP</b>. Semua proses di browser—tanpa upload ke server.</p>
+
+  <section class="card grid">
+    <div class="row">
+      <label class="btn" for="pickFiles">+ Pilih File</label>
+      <input id="pickFiles" type="file" multiple hidden />
+      <label class="btn" for="pickDir" title="Hanya Chrome/Edge">+ Pilih Folder</label>
+      <input id="pickDir" type="file" webkitdirectory directory multiple hidden />
+      <button class="btn primary" id="zipBtn">Buat ZIP (Enter)</button>
+      <button class="btn" id="clearBtn">Bersihkan</button>
+    </div>
+
+    <div id="drop" class="drop" tabindex="0" aria-label="Area drag and drop">
+      Seret & jatuhkan file / folder ke sini
+    </div>
+
+    <div class="row" style="gap:16px">
+      <div style="flex:2 1 380px">
+        <label class="muted">Nama file ZIP</label>
+        <input id="zipName" type="text" value="arsip.zip" />
+      </div>
+      <div style="flex:1 1 200px">
+        <label class="muted">Tingkat kompresi</label>
+        <input id="level" type="number" min="0" max="9" value="6" />
+      </div>
+    </div>
+
+    <div>
+      <div class="progress"><div id="bar" class="bar"></div></div>
+      <div class="meta" id="status">Siap.</div>
+    </div>
+
+    <div>
+      <div class="meta">Daftar file (<span id="count">0</span>):</div>
+      <div id="list" class="list"></div>
+    </div>
+  </section>
+
+  <section class="card" style="margin-top:16px">
+    <h3>Pratinjau ZIP</h3>
+    <div id="preview" class="meta">Belum ada pratinjau.</div>
+  </section>
+</div>
+
+<!-- JSZip dari CDN (client-side only) -->
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+
+<script>
+(function(){
+  const pickFiles = document.getElementById('pickFiles');
+  const pickDir = document.getElementById('pickDir');
+  const drop = document.getElementById('drop');
+  const zipBtn = document.getElementById('zipBtn');
+  const clearBtn = document.getElementById('clearBtn');
+  const listEl = document.getElementById('list');
+  const countEl = document.getElementById('count');
+  const zipNameEl = document.getElementById('zipName');
+  const levelEl = document.getElementById('level');
+  const bar = document.getElementById('bar');
+  const status = document.getElementById('status');
+  const preview = document.getElementById('preview');
+
+  let files = [];
+
+  function fmtBytes(n){ if(n<1024) return n+" B"; const u=['KB','MB','GB','TB']; let i=-1; do{ n/=1024; i++; }while(n>=1024 && i<u.length-1); return n.toFixed(2)+' '+u[i]; }
+
+  function renderList(){
+    listEl.innerHTML = '';
+    files.forEach((f,i)=>{
+      const el = document.createElement('div');
+      el.className='file';
+      el.innerHTML = `<div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;width:70%"><b>${f.webkitRelativePath||f.name}</b></div><div class="meta">${fmtBytes(f.size)}</div>`;
+      listEl.appendChild(el);
+    });
+    countEl.textContent = files.length;
+  }
+
+  function addFiles(list){
+    for(const f of list){ files.push(f); }
+    renderList();
+  }
+
+  pickFiles.addEventListener('change', (e)=> addFiles(e.target.files));
+  pickDir.addEventListener('change', (e)=> addFiles(e.target.files));
+
+  ['dragenter','dragover'].forEach(evt=> drop.addEventListener(evt, (e)=>{ e.preventDefault(); drop.classList.add('highlight'); }));
+  ['dragleave','drop'].forEach(evt=> drop.addEventListener(evt, (e)=>{ e.preventDefault(); drop.classList.remove('highlight'); }));
+  drop.addEventListener('drop', (e)=>{ e.preventDefault(); const items = e.dataTransfer.files; addFiles(items); });
+
+  document.addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ e.preventDefault(); buildZip(); }});
+  zipBtn.addEventListener('click', buildZip);
+  clearBtn.addEventListener('click', ()=>{ files=[]; renderList(); bar.style.width='0%'; status.textContent='Siap.'; preview.textContent='Belum ada pratinjau.'; });
+
+  async function buildZip(){
+    if(files.length===0){ alert('Pilih/seret file dulu.'); return; }
+    const zip = new JSZip();
+    const level = Math.max(0, Math.min(9, parseInt(levelEl.value||'6',10)));
+
+    let done = 0; const total = files.length; bar.style.width='0%';
+    status.textContent = `Mengompresi ${total} file...`;
+
+    for(const f of files){
+      const path = f.webkitRelativePath || f.name;
+      zip.file(path, f);
+      done++; bar.style.width = Math.round((done/total)*50) + '%';
+    }
+
+    const blob = await zip.generateAsync({ type:'blob', compression:'DEFLATE', compressionOptions:{ level } }, (meta)=>{
+      const base = 50; const p = base + Math.round(meta.percent * 0.5);
+      bar.style.width = Math.min(100, p) + '%';
+      status.textContent = `Mengompresi... ${Math.round(meta.percent)}%`;
+    });
+
+    // Pratinjau isi zip
+    const content = await JSZip.loadAsync(blob);
+    let html = '<ul>';
+    content.forEach((relPath, file)=>{
+      html += `<li>${relPath} ${file.dir? '(folder)' : ''}</li>`;
+    });
+    html += '</ul>';
+    preview.innerHTML = html;
+
+    // Unduh
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    const name = (zipNameEl.value || 'arsip.zip').trim();
+    a.download = name.endsWith('.zip')? name : name+'.zip';
+    a.click();
+    setTimeout(()=> URL.revokeObjectURL(a.href), 2000);
+    status.textContent = `Selesai. Terunduh: ${a.download}`;
+  }
+})();
+</script>
+</body>
+</html>
